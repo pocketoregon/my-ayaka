@@ -187,7 +187,7 @@ if (commandName === 'trivia') {
 
     if (!requestedCat) {
       try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
         const result = await model.generateContent(
           'Generate a Genshin Impact trivia question. Respond ONLY in this exact JSON format, no extra text: {"question":"...","correct":"...","wrong":["...","...","..."]}'
         );
@@ -300,7 +300,7 @@ const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geograph
 
     try {
       const model = genAI.getGenerativeModel({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-2.0-flash',
         systemInstruction: `You are a friendly and witty Discord bot assistant. Keep responses concise (under 1800 chars), conversational, and engaging. Use occasional emojis but don't overdo it. The user's name is ${interaction.user.username}.`,
       });
 
