@@ -220,11 +220,9 @@ if (commandName === 'trivia') {
       return;
     }
 
-    const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geography: 22, music: 12 };
+const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geography: 22, music: 12 };
     const catId = categoryMap[requestedCat] || 9;
     const catName = requestedCat.charAt(0).toUpperCase() + requestedCat.slice(1);
-
-    await interaction.deferReply();
     try {
       const res = await fetch(`https://opentdb.com/api.php?amount=1&type=multiple&category=${catId}`);
       const data = await res.json();
