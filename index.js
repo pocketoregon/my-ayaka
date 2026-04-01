@@ -200,14 +200,36 @@ client.on('interactionCreate', async (interaction) => {
     const requestedCat = interaction.options.getString('category');
     await interaction.deferReply();
 
+    // ── Genshin trivia (no category selected) ─────────────────────────────
     if (!requestedCat) {
       try {
         const raw = await askAI([{
           role: 'user',
-          content: 'Generate a Genshin Impact trivia question. Respond ONLY in this exact JSON format, no extra text: {"question":"...","correct":"...","wrong":["...","...","..."]}'
+          content: 'Generate a Genshin Impact trivia question. You MUST respond with ONLY a valid JSON object, absolutely no other text, no markdown, no backticks, no explanation. Format: {"question":"...","correct":"...","wrong":["...","...","..."]}'
         }]);
-        const q = JSON.parse(raw.replace(/```json|```/g, '').trim());
-        const allAnswers = shuffle([q.correct, ...q.wrong]);
+
+        // Extract JSON from anywhere in the response
+        let q;
+        const jsonMatch = raw.match(/\{[\s\S]*"question"[\s\S]*"correct"[\s\S]*"wrong"[\s\S]*\}/);
+        if (!jsonMatch) throw new Error('No valid JSON found in AI response: ' + raw);
+
+        try {
+          q = JSON.parse(jsonMatch[0]);
+        } catch (parseErr) {
+          throw new Error('Failed to parse extracted JSON: ' + jsonMatch[0]);
+        }
+
+        // Validate all required fields
+        if (
+          typeof q.question !== 'string' ||
+          typeof q.correct !== 'string' ||
+          !Array.isArray(q.wrong) ||
+          q.wrong.length < 3
+        ) {
+          throw new Error('AI response missing required fields: ' + JSON.stringify(q));
+        }
+
+        const allAnswers = shuffle([q.correct, ...q.wrong.slice(0, 3)]);
 
         const embed = new EmbedBuilder()
           .setColor(0xf1c40f)
@@ -219,21 +241,31 @@ client.on('interactionCreate', async (interaction) => {
         const msgId = `${interaction.id}`;
         const buttons = new ActionRowBuilder().addComponents(
           allAnswers.map((_, i) =>
-            new ButtonBuilder().setCustomId(`trivia_${msgId}_${i}`).setLabel(`Option ${i + 1}`).setStyle(ButtonStyle.Primary)
+            new ButtonBuilder()
+              .setCustomId(`trivia_${msgId}_${i}`)
+              .setLabel(`Option ${i + 1}`)
+              .setStyle(ButtonStyle.Primary)
           )
         );
+
         triviaState[msgId] = { correct: q.correct, allAnswers, userId: interaction.user.id };
         const sent = await interaction.editReply({ embeds: [embed], components: [buttons] });
+
         setTimeout(async () => {
-          if (triviaState[msgId]) { delete triviaState[msgId]; await sent.edit({ components: [] }).catch(() => {}); }
+          if (triviaState[msgId]) {
+            delete triviaState[msgId];
+            await sent.edit({ components: [] }).catch(() => {});
+          }
         }, 15000);
+
       } catch (e) {
-        console.error(e);
+        console.error('Trivia error:', e.message);
         interaction.editReply('❌ Could not generate a Genshin trivia question. Try again!');
       }
       return;
     }
 
+    // ── Category trivia (opentdb) ──────────────────────────────────────────
     const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geography: 22, music: 12 };
     const catId = categoryMap[requestedCat] || 9;
     const catName = requestedCat.charAt(0).toUpperCase() + requestedCat.slice(1);
@@ -257,7 +289,10 @@ client.on('interactionCreate', async (interaction) => {
       const msgId = `${interaction.id}`;
       const buttons = new ActionRowBuilder().addComponents(
         allAnswers.map((_, i) =>
-          new ButtonBuilder().setCustomId(`trivia_${msgId}_${i}`).setLabel(`Option ${i + 1}`).setStyle(ButtonStyle.Primary)
+          new ButtonBuilder()
+            .setCustomId(`trivia_${msgId}_${i}`)
+            .setLabel(`Option ${i + 1}`)
+            .setStyle(ButtonStyle.Primary)
         )
       );
 
