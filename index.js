@@ -193,8 +193,10 @@ const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           body: JSON.stringify({ model: 'google/gemma-3-4b-it:free', messages: [{ role: 'user', content: 'Generate a Genshin Impact trivia question. Respond ONLY in this exact JSON format, no extra text: {"question":"...","correct":"...","wrong":["...","...","..."]}' }] })
         });
         const aiData = await aiRes.json();
-        if (!aiData.choices || !aiData.choices[0]) throw new Error(JSON.stringify(aiData));         const raw = aiData.choices[0].message.content.replace(/```json|```/g, '').trim();
-        const q = JSON.parse(raw);
+        if (!aiData.choices || !aiData.choices[0]) throw new Error(JSON.stringify(aiData));         let raw = aiData.choices[0].message.content.replace(/```json|```/g, '').trim();
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) throw new Error('No JSON found in response');
+        const q = JSON.parse(jsonMatch[0]);
         const allAnswers = shuffle([q.correct, ...q.wrong]);
 
         const embed = new EmbedBuilder()
