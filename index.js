@@ -30,7 +30,7 @@ async function askAI(messages) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'mistralai/mistral-7b-instruct:free',
+      model: 'openrouter/auto',
       messages,
     }),
   });
