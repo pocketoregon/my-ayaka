@@ -196,7 +196,7 @@ const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         if (!aiData.choices || !aiData.choices[0]) throw new Error(JSON.stringify(aiData));         let raw = aiData.choices[0].message.content.replace(/```json|```/g, '').trim();
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
         if (!jsonMatch) throw new Error('No JSON found in response');
-        const q = JSON.parse(jsonMatch[0]);
+        const cleaned = jsonMatch[0].replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();         const q = JSON.parse(cleaned);
         const allAnswers = shuffle([q.correct, ...q.wrong]);
 
         const embed = new EmbedBuilder()
