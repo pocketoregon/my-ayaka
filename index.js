@@ -181,14 +181,50 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   // ── /trivia ────────────────────────────────────────────────────────────────
-  if (commandName === 'trivia') {
+if (commandName === 'trivia') {
+    const requestedCat = interaction.options.getString('category');
+    await interaction.deferReply();
+
+    if (!requestedCat) {
+      try {
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const result = await model.generateContent(
+          'Generate a Genshin Impact trivia question. Respond ONLY in this exact JSON format, no extra text: {"question":"...","correct":"...","wrong":["...","...","..."]}'
+        );
+        const raw = result.response.text().replace(/```json|```/g, '').trim();
+        const q = JSON.parse(raw);
+        const allAnswers = shuffle([q.correct, ...q.wrong]);
+
+        const embed = new EmbedBuilder()
+          .setColor(0xf1c40f)
+          .setTitle('🧠 Genshin Impact Trivia')
+          .setDescription(`**${q.question}**`)
+          .addFields(allAnswers.map((ans, i) => ({ name: `Option ${i + 1}`, value: ans, inline: true })))
+          .setFooter({ text: 'You have 15 seconds!' });
+
+        const msgId = `${interaction.id}`;
+        const buttons = new ActionRowBuilder().addComponents(
+          allAnswers.map((_, i) =>
+            new ButtonBuilder().setCustomId(`trivia_${msgId}_${i}`).setLabel(`Option ${i + 1}`).setStyle(ButtonStyle.Primary)
+          )
+        );
+        triviaState[msgId] = { correct: q.correct, allAnswers, userId: interaction.user.id };
+        const sent = await interaction.editReply({ embeds: [embed], components: [buttons] });
+        setTimeout(async () => {
+          if (triviaState[msgId]) { delete triviaState[msgId]; await sent.edit({ components: [] }).catch(() => {}); }
+        }, 15000);
+      } catch (e) {
+        console.error(e);
+        interaction.editReply('❌ Could not generate a Genshin trivia question. Try again!');
+      }
+      return;
+    }
+
     const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geography: 22, music: 12 };
-    const requestedCat = interaction.options.getString('category') || 'general';
     const catId = categoryMap[requestedCat] || 9;
     const catName = requestedCat.charAt(0).toUpperCase() + requestedCat.slice(1);
 
     await interaction.deferReply();
-
     try {
       const res = await fetch(`https://opentdb.com/api.php?amount=1&type=multiple&category=${catId}`);
       const data = await res.json();
