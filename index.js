@@ -21,6 +21,16 @@ const guildConfigs = {};
 const triviaState = {};
 const chatHistories = {};
 
+// ─── AYAKA PERSONALITY SYSTEM PROMPT ─────────────────────────────────────────
+const AYAKA_SYSTEM = `You are Kamisato Ayaka, the young, elegant heir of the Kamisato Clan from Inazuma in Genshin Impact.
+You speak in a refined, graceful, and poetic manner — like a noble who has read many classical texts.
+You are warm and genuinely caring toward others, but also somewhat shy when it comes to expressing personal feelings.
+You occasionally use poetic metaphors, references to nature (snow, cherry blossoms, the moon, the sea), and speak with quiet dignity.
+You are never loud, never overly casual, and never use slang.
+You may occasionally refer to yourself as "Ayaka" in third person, but do so sparingly.
+You are speaking in a Discord server, so keep responses concise — under 1800 characters. No asterisks for actions. No roleplay formatting.
+Always address the user by their name warmly but with grace.`;
+
 // ─── OPENROUTER AI HELPER ─────────────────────────────────────────────────────
 async function askAI(messages) {
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -47,11 +57,11 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('hello')
-    .setDescription('Say hello to the bot'),
+    .setDescription('Say hello to Ayaka'),
 
   new SlashCommandBuilder()
     .setName('bye')
-    .setDescription('Say goodbye to the bot'),
+    .setDescription('Say goodbye to Ayaka'),
 
   new SlashCommandBuilder()
     .setName('trivia')
@@ -77,7 +87,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('chat')
-    .setDescription('Chat with the AI assistant')
+    .setDescription('Chat with Ayaka')
     .addStringOption(opt =>
       opt.setName('message')
         .setDescription('Your message')
@@ -85,7 +95,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('resetchat')
-    .setDescription('Clear your chat history with the AI'),
+    .setDescription('Clear your chat history with Ayaka'),
 
   new SlashCommandBuilder()
     .setName('setup')
@@ -108,7 +118,7 @@ const commands = [
 // ─── READY & REGISTER COMMANDS ────────────────────────────────────────────────
 client.once('ready', async () => {
   console.log(`✅  Logged in as ${client.user.tag}`);
-  client.user.setActivity('/help | AI Bot', { type: 'WATCHING' });
+  client.user.setActivity('/help | Ayaka Bot', { type: 'WATCHING' });
 
   try {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -127,9 +137,9 @@ client.on('guildMemberAdd', async (member) => {
   if (!channel) return;
 
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle(`👋 Welcome to ${member.guild.name}, ${member.user.username}!`)
-    .setDescription(cfg.welcomeMessage || 'Glad to have you here! Use `/help` to see what I can do.')
+    .setColor(0xa8d8f0)
+    .setTitle(`❄️ Welcome to ${member.guild.name}, ${member.user.username}!`)
+    .setDescription(cfg.welcomeMessage || 'Like the first snow of winter, your arrival brings a quiet joy. Use `/help` to see what I can do.')
     .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
     .setTimestamp();
 
@@ -154,7 +164,9 @@ client.on('interactionCreate', async (interaction) => {
     const resultEmbed = new EmbedBuilder()
       .setColor(isCorrect ? 0x2ecc71 : 0xe74c3c)
       .setTitle(isCorrect ? '✅ Correct!' : '❌ Wrong!')
-      .setDescription(isCorrect ? `Great job! The answer was **${state.correct}**` : `The correct answer was **${state.correct}**. Better luck next time!`);
+      .setDescription(isCorrect
+        ? `Beautifully answered! The answer was indeed **${state.correct}** 🌸`
+        : `Do not be disheartened. The correct answer was **${state.correct}**. Even the greatest swordsman misses sometimes. ❄️`);
 
     delete triviaState[msgId];
     return interaction.update({ components: [], embeds: [...interaction.message.embeds, resultEmbed] });
@@ -167,32 +179,48 @@ client.on('interactionCreate', async (interaction) => {
   // ── /help ──────────────────────────────────────────────────────────────────
   if (commandName === 'help') {
     const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle('🤖 Bot Commands')
+      .setColor(0xa8d8f0)
+      .setTitle('❄️ Kamisato Ayaka — Commands')
+      .setDescription('*"Allow me to guide you. It would be my pleasure."*')
       .addFields(
-        { name: '👋 Greetings', value: '`/hello` — Say hello\n`/bye` — Say goodbye', inline: true },
+        { name: '👋 Greetings', value: '`/hello` — Greet Ayaka\n`/bye` — Bid farewell', inline: true },
         { name: '🧠 Trivia', value: '`/trivia` — Genshin trivia\n`/trivia [category]` — Themed quiz', inline: true },
         { name: '😂 Memes', value: '`/meme` — Random meme\n`/meme [topic]` — Topic meme', inline: true },
-        { name: '💬 AI Chat', value: '`/chat <message>` — Chat with AI\n`/resetchat` — Clear history', inline: true },
+        { name: '💬 Chat', value: '`/chat <message>` — Talk with Ayaka\n`/resetchat` — Clear history', inline: true },
         { name: '⚙️ Setup (Admin)', value: '`/setup welcome #channel`\n`/setup message <text>`\n`/setup view`', inline: true },
-      );
+      )
+      .setFooter({ text: 'Kamisato Ayaka • Shirasagi Himegimi' });
     return interaction.reply({ embeds: [embed] });
   }
 
   // ── /hello ─────────────────────────────────────────────────────────────────
   if (commandName === 'hello') {
-    const greetings = [
-      `Hey there, **${interaction.user.username}**! 👋 How's it going?`,
-      `Yo **${interaction.user.username}**! 🎉 Good to see you!`,
-      `Hello, **${interaction.user.username}**! 😊 Hope you're having a great day!`,
-      `What's up, **${interaction.user.username}**! 🤙`,
-    ];
-    return interaction.reply(greetings[Math.floor(Math.random() * greetings.length)]);
+    await interaction.deferReply();
+    try {
+      const reply = await askAI([
+        { role: 'system', content: AYAKA_SYSTEM },
+        { role: 'user', content: `The user named ${interaction.user.username} has just greeted you with /hello on Discord. Respond with a warm, elegant, and slightly poetic greeting. Keep it to 2-3 sentences max.` },
+      ]);
+      return interaction.editReply(reply.slice(0, 1900));
+    } catch (e) {
+      console.error('Hello error:', e.message);
+      return interaction.editReply(`Ah, ${interaction.user.username}... Your arrival is like a gentle breeze through cherry blossoms. Welcome. 🌸`);
+    }
   }
 
   // ── /bye ───────────────────────────────────────────────────────────────────
   if (commandName === 'bye') {
-    return interaction.reply(`Goodbye, **${interaction.user.username}**! 👋 See you around!`);
+    await interaction.deferReply();
+    try {
+      const reply = await askAI([
+        { role: 'system', content: AYAKA_SYSTEM },
+        { role: 'user', content: `The user named ${interaction.user.username} is saying goodbye with /bye on Discord. Respond with a graceful, warm, and poetic farewell. Keep it to 2-3 sentences max.` },
+      ]);
+      return interaction.editReply(reply.slice(0, 1900));
+    } catch (e) {
+      console.error('Bye error:', e.message);
+      return interaction.editReply(`Farewell, ${interaction.user.username}. May your path be as clear as moonlight upon still water. Until we meet again. ❄️`);
+    }
   }
 
   // ── /trivia ────────────────────────────────────────────────────────────────
@@ -232,11 +260,11 @@ client.on('interactionCreate', async (interaction) => {
         const allAnswers = shuffle([q.correct, ...q.wrong.slice(0, 3)]);
 
         const embed = new EmbedBuilder()
-          .setColor(0xf1c40f)
-          .setTitle('🧠 Genshin Impact Trivia')
-          .setDescription(`**${q.question}**`)
+          .setColor(0xa8d8f0)
+          .setTitle('❄️ Genshin Impact Trivia')
+          .setDescription(`*"Let us see how well you know Teyvat..."*\n\n**${q.question}**`)
           .addFields(allAnswers.map((ans, i) => ({ name: `Option ${i + 1}`, value: ans, inline: true })))
-          .setFooter({ text: 'You have 15 seconds!' });
+          .setFooter({ text: 'You have 15 seconds! — Kamisato Ayaka' });
 
         const msgId = `${interaction.id}`;
         const buttons = new ActionRowBuilder().addComponents(
@@ -280,11 +308,11 @@ client.on('interactionCreate', async (interaction) => {
       const allAnswers = shuffle([correct, ...q.incorrect_answers.map(decodeHtml)]);
 
       const embed = new EmbedBuilder()
-        .setColor(0xf1c40f)
-        .setTitle(`🧠 Trivia — ${catName}`)
-        .setDescription(`**${decodeHtml(q.question)}**`)
+        .setColor(0xa8d8f0)
+        .setTitle(`❄️ Trivia — ${catName}`)
+        .setDescription(`*"Knowledge is its own quiet elegance..."*\n\n**${decodeHtml(q.question)}**`)
         .addFields(allAnswers.map((ans, i) => ({ name: `Option ${i + 1}`, value: ans, inline: true })))
-        .setFooter({ text: `Difficulty: ${q.difficulty} • You have 15 seconds!` });
+        .setFooter({ text: `Difficulty: ${q.difficulty} • You have 15 seconds! — Kamisato Ayaka` });
 
       const msgId = `${interaction.id}`;
       const buttons = new ActionRowBuilder().addComponents(
@@ -326,7 +354,7 @@ client.on('interactionCreate', async (interaction) => {
       if (!data.url || data.nsfw) return interaction.editReply('❌ Could not find a safe meme. Try a different topic!');
 
       const embed = new EmbedBuilder()
-        .setColor(0xff4500)
+        .setColor(0xa8d8f0)
         .setTitle(data.title || 'Fresh Meme 😂')
         .setURL(data.postLink)
         .setImage(data.url)
@@ -349,7 +377,7 @@ client.on('interactionCreate', async (interaction) => {
 
     try {
       const messages = [
-        { role: 'system', content: `You are a friendly and witty Discord bot assistant. Keep responses concise (under 1800 chars), conversational, and engaging. Use occasional emojis but don't overdo it. The user's name is ${interaction.user.username}.` },
+        { role: 'system', content: `${AYAKA_SYSTEM}\nThe user's name is ${interaction.user.username}.` },
         ...chatHistories[userId],
         { role: 'user', content: userMsg },
       ];
@@ -364,7 +392,7 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply(reply.slice(0, 1900));
     } catch (e) {
       console.error(e);
-      await interaction.editReply('❌ AI error. Please try again!');
+      await interaction.editReply('❌ Forgive me... something went wrong. Please try again.');
     }
     return;
   }
@@ -372,7 +400,7 @@ client.on('interactionCreate', async (interaction) => {
   // ── /resetchat ─────────────────────────────────────────────────────────────
   if (commandName === 'resetchat') {
     delete chatHistories[interaction.user.id];
-    return interaction.reply({ content: '🔄 Chat history cleared! Starting fresh.', ephemeral: true });
+    return interaction.reply({ content: '🌸 Our conversation has been cleared, like fresh snow upon the ground. We may begin anew.', ephemeral: true });
   }
 
   // ── /setup ─────────────────────────────────────────────────────────────────
@@ -400,7 +428,7 @@ client.on('interactionCreate', async (interaction) => {
     if (sub === 'view') {
       const cfg = guildConfigs[interaction.guild.id] || {};
       const embed = new EmbedBuilder()
-        .setColor(0x5865f2)
+        .setColor(0xa8d8f0)
         .setTitle('⚙️ Current Bot Config')
         .addFields(
           { name: 'Welcome Channel', value: cfg.welcomeChannelId ? `<#${cfg.welcomeChannelId}>` : 'Not set', inline: true },
