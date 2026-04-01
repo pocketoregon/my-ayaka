@@ -17,7 +17,7 @@ const client = new Client({
   ],
 });
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
 
 // In-memory store
 const guildConfigs = {};
@@ -187,11 +187,13 @@ if (commandName === 'trivia') {
 
     if (!requestedCat) {
       try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
-        const result = await model.generateContent(
-          'Generate a Genshin Impact trivia question. Respond ONLY in this exact JSON format, no extra text: {"question":"...","correct":"...","wrong":["...","...","..."]}'
-        );
-        const raw = result.response.text().replace(/```json|```/g, '').trim();
+const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENROUTER_API_KEY}` },
+          body: JSON.stringify({ model: 'meta-llama/llama-3.2-3b-instruct:free', messages: [{ role: 'user', content: 'Generate a Genshin Impact trivia question. Respond ONLY in this exact JSON format, no extra text: {"question":"...","correct":"...","wrong":["...","...","..."]}' }] })
+        });
+        const aiData = await aiRes.json();
+        const raw = aiData.choices[0].message.content.replace(/```json|```/g, '').trim();
         const q = JSON.parse(raw);
         const allAnswers = shuffle([q.correct, ...q.wrong]);
 
@@ -299,14 +301,18 @@ const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geograph
     await interaction.deferReply();
 
     try {
-      const model = genAI.getGenerativeModel({
-        model: 'gemini-2.0-flash-lite',
-        systemInstruction: `You are a friendly and witty Discord bot assistant. Keep responses concise (under 1800 chars), conversational, and engaging. Use occasional emojis but don't overdo it. The user's name is ${interaction.user.username}.`,
+ const messages = [
+        { role: 'system', content: `You are a friendly and witty Discord bot assistant. Keep responses concise (under 1800 chars), conversational, and engaging. Use occasional emojis but don't overdo it. The user's name is ${interaction.user.username}.` },
+        ...chatHistories[userId].map(m => ({ role: m.role === 'model' ? 'assistant' : 'user', content: m.parts[0].text })),
+        { role: 'user', content: userMsg }
+      ];
+      const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENROUTER_API_KEY}` },
+        body: JSON.stringify({ model: 'meta-llama/llama-3.2-3b-instruct:free', messages })
       });
-
-      const chat = model.startChat({ history: chatHistories[userId] });
-      const result = await chat.sendMessage(userMsg);
-      const reply = result.response.text();
+      const aiData = await aiRes.json();
+      const reply = aiData.choices[0].message.content;
 
       chatHistories[userId].push({ role: 'user', parts: [{ text: userMsg }] });
       chatHistories[userId].push({ role: 'model', parts: [{ text: reply }] });
