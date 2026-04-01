@@ -5,7 +5,7 @@ const {
   PermissionFlagsBits, REST, Routes,
   SlashCommandBuilder, InteractionType
 } = require('discord.js');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
 const client = new Client({
