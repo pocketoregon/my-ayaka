@@ -234,7 +234,7 @@ client.on('interactionCreate', async (interaction) => {
   if (commandName === 'meme') {
     await interaction.deferReply();
     try {
-      const subreddits = ['memes', 'dankmemes', 'me_irl', 'funny', 'AdviceAnimals'];
+      const subreddits = ['Genshin_Impact', 'GenshinImpactMemes', 'GenshinMemepact'];
       const subreddit = interaction.options.getString('topic') || subreddits[Math.floor(Math.random() * subreddits.length)];
 
       const res = await fetch(`https://meme-api.com/gimme/${subreddit}`);
