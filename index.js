@@ -1,5 +1,10 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
+const {
+  Client, GatewayIntentBits, EmbedBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  PermissionFlagsBits, REST, Routes,
+  SlashCommandBuilder, InteractionType
+} = require('discord.js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
@@ -19,147 +24,223 @@ const guildConfigs = {};
 const triviaState = {};
 const chatHistories = {};
 
-// ─── READY ────────────────────────────────────────────────────────────────────
-client.once('ready', () => {
+// ─── SLASH COMMAND DEFINITIONS ────────────────────────────────────────────────
+const commands = [
+  new SlashCommandBuilder()
+    .setName('help')
+    .setDescription('Show all available commands'),
+
+  new SlashCommandBuilder()
+    .setName('hello')
+    .setDescription('Say hello to the bot'),
+
+  new SlashCommandBuilder()
+    .setName('bye')
+    .setDescription('Say goodbye to the bot'),
+
+  new SlashCommandBuilder()
+    .setName('trivia')
+    .setDescription('Start a trivia quiz')
+    .addStringOption(opt =>
+      opt.setName('category')
+        .setDescription('Choose a category')
+        .addChoices(
+          { name: 'General Knowledge', value: 'general' },
+          { name: 'Science', value: 'science' },
+          { name: 'History', value: 'history' },
+          { name: 'Sports', value: 'sports' },
+          { name: 'Geography', value: 'geography' },
+          { name: 'Music', value: 'music' },
+        )),
+
+  new SlashCommandBuilder()
+    .setName('meme')
+    .setDescription('Get a random meme')
+    .addStringOption(opt =>
+      opt.setName('topic')
+        .setDescription('Optional subreddit topic (e.g. dankmemes, funny)')),
+
+  new SlashCommandBuilder()
+    .setName('chat')
+    .setDescription('Chat with the AI assistant')
+    .addStringOption(opt =>
+      opt.setName('message')
+        .setDescription('Your message')
+        .setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('resetchat')
+    .setDescription('Clear your chat history with the AI'),
+
+  new SlashCommandBuilder()
+    .setName('setup')
+    .setDescription('Configure the bot (Admin only)')
+    .addSubcommand(sub =>
+      sub.setName('welcome')
+        .setDescription('Set the welcome channel')
+        .addChannelOption(opt =>
+          opt.setName('channel').setDescription('The welcome channel').setRequired(true)))
+    .addSubcommand(sub =>
+      sub.setName('message')
+        .setDescription('Set the welcome message')
+        .addStringOption(opt =>
+          opt.setName('text').setDescription('The welcome message text').setRequired(true)))
+    .addSubcommand(sub =>
+      sub.setName('view')
+        .setDescription('View current bot configuration')),
+].map(cmd => cmd.toJSON());
+
+// ─── READY & REGISTER COMMANDS ────────────────────────────────────────────────
+client.once('ready', async () => {
   console.log(`✅  Logged in as ${client.user.tag}`);
-  client.user.setActivity('!help | Powered by Gemini', { type: 'WATCHING' });
+  client.user.setActivity('/help | AI Bot', { type: 'WATCHING' });
+
+  try {
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+    console.log('✅  Slash commands registered globally!');
+  } catch (err) {
+    console.error('❌  Failed to register commands:', err);
+  }
 });
 
 // ─── GREET NEW MEMBERS ────────────────────────────────────────────────────────
 client.on('guildMemberAdd', async (member) => {
   const cfg = guildConfigs[member.guild.id];
   if (!cfg?.welcomeChannelId) return;
-
   const channel = member.guild.channels.cache.get(cfg.welcomeChannelId);
   if (!channel) return;
 
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle(`👋 Welcome to ${member.guild.name}, ${member.user.username}!`)
-    .setDescription(cfg.welcomeMessage || 'Glad to have you here! Use `!help` to see what I can do.')
+    .setDescription(cfg.welcomeMessage || 'Glad to have you here! Use `/help` to see what I can do.')
     .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
     .setTimestamp();
 
   channel.send({ embeds: [embed] });
 });
 
-// ─── MESSAGE HANDLER ──────────────────────────────────────────────────────────
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
+// ─── INTERACTION HANDLER ──────────────────────────────────────────────────────
+client.on('interactionCreate', async (interaction) => {
 
-  const prefix = '!';
-  if (!message.content.startsWith(prefix)) return;
+  // ── Button interactions (trivia answers) ───────────────────────────────────
+  if (interaction.isButton()) {
+    const [type, msgId, idx] = interaction.customId.split('_');
+    if (type !== 'trivia') return;
 
-  const args = message.content.slice(prefix.length).trim().split(/\s+/);
-  const command = args.shift().toLowerCase();
+    const state = triviaState[msgId];
+    if (!state) return interaction.reply({ content: '❌ This trivia session has expired!', ephemeral: true });
+    if (interaction.user.id !== state.userId) return interaction.reply({ content: '❌ This is not your trivia question!', ephemeral: true });
 
-  // ── !help ──────────────────────────────────────────────────────────────────
-  if (command === 'help') {
+    const chosen = state.allAnswers[parseInt(idx)];
+    const isCorrect = chosen === state.correct;
+
+    const resultEmbed = new EmbedBuilder()
+      .setColor(isCorrect ? 0x2ecc71 : 0xe74c3c)
+      .setTitle(isCorrect ? '✅ Correct!' : '❌ Wrong!')
+      .setDescription(isCorrect ? `Great job! The answer was **${state.correct}**` : `The correct answer was **${state.correct}**. Better luck next time!`);
+
+    delete triviaState[msgId];
+    return interaction.update({ components: [], embeds: [...interaction.message.embeds, resultEmbed] });
+  }
+
+  if (!interaction.isChatInputCommand()) return;
+
+  const { commandName } = interaction;
+
+  // ── /help ──────────────────────────────────────────────────────────────────
+  if (commandName === 'help') {
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
       .setTitle('🤖 Bot Commands')
       .addFields(
-        { name: '👋 Greetings', value: '`!hello` — Say hello\n`!bye` — Say goodbye', inline: true },
-        { name: '🧠 Trivia', value: '`!trivia` — Start a quiz\n`!trivia <category>` — Themed quiz\n(Categories: science, history, sports, general)', inline: true },
-        { name: '😂 Memes', value: '`!meme` — Random meme\n`!meme <topic>` — Topic meme', inline: true },
-        { name: '💬 AI Chat', value: '`!chat <message>` — Chat with Gemini AI\n`!resetchat` — Clear chat history', inline: true },
-        { name: '⚙️ Setup (Admin)', value: '`!setup welcome #channel` — Set welcome channel\n`!setup message <text>` — Set welcome message\n`!setup view` — View current config', inline: true },
-      )
-      .setFooter({ text: 'Powered by Google Gemini AI (Free)' });
-    return message.reply({ embeds: [embed] });
+        { name: '👋 Greetings', value: '`/hello` — Say hello\n`/bye` — Say goodbye', inline: true },
+        { name: '🧠 Trivia', value: '`/trivia` — Start a quiz\n`/trivia [category]` — Themed quiz', inline: true },
+        { name: '😂 Memes', value: '`/meme` — Random meme\n`/meme [topic]` — Topic meme', inline: true },
+        { name: '💬 AI Chat', value: '`/chat <message>` — Chat with AI\n`/resetchat` — Clear history', inline: true },
+        { name: '⚙️ Setup (Admin)', value: '`/setup welcome #channel`\n`/setup message <text>`\n`/setup view`', inline: true },
+      );
+    return interaction.reply({ embeds: [embed] });
   }
 
-  // ── !hello / !hi ───────────────────────────────────────────────────────────
-  if (command === 'hello' || command === 'hi' || command === 'hey') {
+  // ── /hello ─────────────────────────────────────────────────────────────────
+  if (commandName === 'hello') {
     const greetings = [
-      `Hey there, **${message.author.username}**! 👋 How's it going?`,
-      `Yo **${message.author.username}**! 🎉 Good to see you!`,
-      `Hello, **${message.author.username}**! 😊 Hope you're having a great day!`,
-      `What's up, **${message.author.username}**! 🤙`,
+      `Hey there, **${interaction.user.username}**! 👋 How's it going?`,
+      `Yo **${interaction.user.username}**! 🎉 Good to see you!`,
+      `Hello, **${interaction.user.username}**! 😊 Hope you're having a great day!`,
+      `What's up, **${interaction.user.username}**! 🤙`,
     ];
-    return message.reply(greetings[Math.floor(Math.random() * greetings.length)]);
+    return interaction.reply(greetings[Math.floor(Math.random() * greetings.length)]);
   }
 
-  // ── !bye ───────────────────────────────────────────────────────────────────
-  if (command === 'bye' || command === 'goodbye') {
-    return message.reply(`Goodbye, **${message.author.username}**! 👋 See you around!`);
+  // ── /bye ───────────────────────────────────────────────────────────────────
+  if (commandName === 'bye') {
+    return interaction.reply(`Goodbye, **${interaction.user.username}**! 👋 See you around!`);
   }
 
-  // ── !trivia ─────────────────────────────────────────────────────────────────
-  if (command === 'trivia') {
+  // ── /trivia ────────────────────────────────────────────────────────────────
+  if (commandName === 'trivia') {
     const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geography: 22, music: 12 };
-    const requestedCat = args[0]?.toLowerCase();
+    const requestedCat = interaction.options.getString('category') || 'general';
     const catId = categoryMap[requestedCat] || 9;
-    const catName = requestedCat ? (requestedCat.charAt(0).toUpperCase() + requestedCat.slice(1)) : 'General Knowledge';
+    const catName = requestedCat.charAt(0).toUpperCase() + requestedCat.slice(1);
+
+    await interaction.deferReply();
 
     try {
       const res = await fetch(`https://opentdb.com/api.php?amount=1&type=multiple&category=${catId}`);
       const data = await res.json();
-      if (data.response_code !== 0) return message.reply('❌ Could not fetch trivia right now. Try again!');
+      if (data.response_code !== 0) return interaction.editReply('❌ Could not fetch trivia right now. Try again!');
 
       const q = data.results[0];
       const correct = decodeHtml(q.correct_answer);
       const allAnswers = shuffle([correct, ...q.incorrect_answers.map(decodeHtml)]);
-      const labels = ['🅰', '🅱', '🆎', '🅾'];
 
       const embed = new EmbedBuilder()
         .setColor(0xf1c40f)
         .setTitle(`🧠 Trivia — ${catName}`)
         .setDescription(`**${decodeHtml(q.question)}**`)
-        .addFields(
-          allAnswers.map((ans, i) => ({ name: `${labels[i]} Option ${i + 1}`, value: ans, inline: true }))
-        )
+        .addFields(allAnswers.map((ans, i) => ({ name: `Option ${i + 1}`, value: ans, inline: true })))
         .setFooter({ text: `Difficulty: ${q.difficulty} • You have 15 seconds!` });
 
+      const msgId = `${interaction.id}`;
       const buttons = new ActionRowBuilder().addComponents(
-        allAnswers.map((ans, i) =>
-          new ButtonBuilder().setCustomId(`trivia_${message.id}_${i}`).setLabel(`Option ${i + 1}`).setStyle(ButtonStyle.Primary)
+        allAnswers.map((_, i) =>
+          new ButtonBuilder().setCustomId(`trivia_${msgId}_${i}`).setLabel(`Option ${i + 1}`).setStyle(ButtonStyle.Primary)
         )
       );
 
-      const sent = await message.reply({ embeds: [embed], components: [buttons] });
-      triviaState[message.id] = { correct, allAnswers, userId: message.author.id };
+      triviaState[msgId] = { correct, allAnswers, userId: interaction.user.id };
 
-      const collector = sent.createMessageComponentCollector({ time: 15000 });
-      collector.on('collect', async (interaction) => {
-        if (interaction.user.id !== message.author.id) {
-          return interaction.reply({ content: '❌ This is not your trivia question!', ephemeral: true });
+      const sent = await interaction.editReply({ embeds: [embed], components: [buttons] });
+
+      setTimeout(async () => {
+        if (triviaState[msgId]) {
+          delete triviaState[msgId];
+          await sent.edit({ components: [] }).catch(() => {});
         }
-        const idx = parseInt(interaction.customId.split('_')[2]);
-        const chosen = allAnswers[idx];
-        const isCorrect = chosen === correct;
-
-        const resultEmbed = new EmbedBuilder()
-          .setColor(isCorrect ? 0x2ecc71 : 0xe74c3c)
-          .setTitle(isCorrect ? '✅ Correct!' : '❌ Wrong!')
-          .setDescription(isCorrect ? `Great job! The answer was **${correct}**` : `The correct answer was **${correct}**. Better luck next time!`);
-
-        collector.stop();
-        await interaction.update({ embeds: [embed, resultEmbed], components: [] });
-      });
-
-      collector.on('end', (_, reason) => {
-        if (reason === 'time') sent.edit({ components: [] }).catch(() => {});
-        delete triviaState[message.id];
-      });
+      }, 15000);
 
     } catch (e) {
       console.error(e);
-      message.reply('❌ Trivia error. Please try again later!');
+      interaction.editReply('❌ Trivia error. Please try again later!');
     }
     return;
   }
 
-  // ── !meme ──────────────────────────────────────────────────────────────────
-  if (command === 'meme') {
+  // ── /meme ──────────────────────────────────────────────────────────────────
+  if (commandName === 'meme') {
+    await interaction.deferReply();
     try {
       const subreddits = ['memes', 'dankmemes', 'me_irl', 'funny', 'AdviceAnimals'];
-      const subreddit = args[0] ? args[0] : subreddits[Math.floor(Math.random() * subreddits.length)];
+      const subreddit = interaction.options.getString('topic') || subreddits[Math.floor(Math.random() * subreddits.length)];
 
       const res = await fetch(`https://meme-api.com/gimme/${subreddit}`);
       const data = await res.json();
 
-      if (!data.url || data.nsfw) return message.reply('❌ Could not find a safe meme. Try a different topic!');
+      if (!data.url || data.nsfw) return interaction.editReply('❌ Could not find a safe meme. Try a different topic!');
 
       const embed = new EmbedBuilder()
         .setColor(0xff4500)
@@ -168,80 +249,74 @@ client.on('messageCreate', async (message) => {
         .setImage(data.url)
         .setFooter({ text: `👍 ${data.ups.toLocaleString()} upvotes • r/${data.subreddit}` });
 
-      return message.reply({ embeds: [embed] });
+      return interaction.editReply({ embeds: [embed] });
     } catch (e) {
       console.error(e);
-      return message.reply('❌ Could not fetch a meme right now. Try again later!');
+      return interaction.editReply('❌ Could not fetch a meme right now. Try again later!');
     }
   }
 
-  // ── !chat ──────────────────────────────────────────────────────────────────
-  if (command === 'chat') {
-    const userMsg = args.join(' ');
-    if (!userMsg) return message.reply('💬 Usage: `!chat <your message>`');
-
-    const userId = message.author.id;
+  // ── /chat ──────────────────────────────────────────────────────────────────
+  if (commandName === 'chat') {
+    const userMsg = interaction.options.getString('message');
+    const userId = interaction.user.id;
     if (!chatHistories[userId]) chatHistories[userId] = [];
 
-    const typingMsg = await message.reply('💭 Thinking...');
+    await interaction.deferReply();
 
     try {
       const model = genAI.getGenerativeModel({
         model: 'gemini-1.5-flash',
-        systemInstruction: `You are a friendly and witty Discord bot assistant. Keep responses concise (under 1800 chars), conversational, and engaging. Use occasional emojis but don't overdo it. The user's name is ${message.author.username}.`,
+        systemInstruction: `You are a friendly and witty Discord bot assistant. Keep responses concise (under 1800 chars), conversational, and engaging. Use occasional emojis but don't overdo it. The user's name is ${interaction.user.username}.`,
       });
 
       const chat = model.startChat({ history: chatHistories[userId] });
       const result = await chat.sendMessage(userMsg);
       const reply = result.response.text();
 
-      // Save to history
       chatHistories[userId].push({ role: 'user', parts: [{ text: userMsg }] });
       chatHistories[userId].push({ role: 'model', parts: [{ text: reply }] });
 
-      // Cap history at 20 messages
       if (chatHistories[userId].length > 20) chatHistories[userId] = chatHistories[userId].slice(-20);
 
-      await typingMsg.edit(reply.slice(0, 1900));
+      await interaction.editReply(reply.slice(0, 1900));
     } catch (e) {
       console.error(e);
-      await typingMsg.edit('❌ AI error. Please try again!');
+      await interaction.editReply('❌ AI error. Please try again!');
     }
     return;
   }
 
-  // ── !resetchat ─────────────────────────────────────────────────────────────
-  if (command === 'resetchat') {
-    delete chatHistories[message.author.id];
-    return message.reply('🔄 Chat history cleared! Starting fresh.');
+  // ── /resetchat ─────────────────────────────────────────────────────────────
+  if (commandName === 'resetchat') {
+    delete chatHistories[interaction.user.id];
+    return interaction.reply({ content: '🔄 Chat history cleared! Starting fresh.', ephemeral: true });
   }
 
-  // ── !setup (Admin only) ────────────────────────────────────────────────────
-  if (command === 'setup') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-      return message.reply('❌ You need **Administrator** permission to use setup commands.');
+  // ── /setup ─────────────────────────────────────────────────────────────────
+  if (commandName === 'setup') {
+    if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: '❌ You need **Administrator** permission to use setup commands.', ephemeral: true });
     }
 
-    const sub = args[0]?.toLowerCase();
+    const sub = interaction.options.getSubcommand();
 
     if (sub === 'welcome') {
-      const channel = message.mentions.channels.first();
-      if (!channel) return message.reply('❌ Please mention a channel: `!setup welcome #channel`');
-      if (!guildConfigs[message.guild.id]) guildConfigs[message.guild.id] = {};
-      guildConfigs[message.guild.id].welcomeChannelId = channel.id;
-      return message.reply(`✅ Welcome channel set to ${channel}!`);
+      const channel = interaction.options.getChannel('channel');
+      if (!guildConfigs[interaction.guild.id]) guildConfigs[interaction.guild.id] = {};
+      guildConfigs[interaction.guild.id].welcomeChannelId = channel.id;
+      return interaction.reply({ content: `✅ Welcome channel set to ${channel}!`, ephemeral: true });
     }
 
     if (sub === 'message') {
-      const text = args.slice(1).join(' ');
-      if (!text) return message.reply('❌ Provide a message: `!setup message Your welcome text here`');
-      if (!guildConfigs[message.guild.id]) guildConfigs[message.guild.id] = {};
-      guildConfigs[message.guild.id].welcomeMessage = text;
-      return message.reply(`✅ Welcome message set to: *"${text}"*`);
+      const text = interaction.options.getString('text');
+      if (!guildConfigs[interaction.guild.id]) guildConfigs[interaction.guild.id] = {};
+      guildConfigs[interaction.guild.id].welcomeMessage = text;
+      return interaction.reply({ content: `✅ Welcome message set to: *"${text}"*`, ephemeral: true });
     }
 
     if (sub === 'view') {
-      const cfg = guildConfigs[message.guild.id] || {};
+      const cfg = guildConfigs[interaction.guild.id] || {};
       const embed = new EmbedBuilder()
         .setColor(0x5865f2)
         .setTitle('⚙️ Current Bot Config')
@@ -249,10 +324,8 @@ client.on('messageCreate', async (message) => {
           { name: 'Welcome Channel', value: cfg.welcomeChannelId ? `<#${cfg.welcomeChannelId}>` : 'Not set', inline: true },
           { name: 'Welcome Message', value: cfg.welcomeMessage || 'Default', inline: true },
         );
-      return message.reply({ embeds: [embed] });
+      return interaction.reply({ embeds: [embed], ephemeral: true });
     }
-
-    return message.reply('❌ Unknown setup option. Try: `!setup welcome #channel`, `!setup message <text>`, or `!setup view`');
   }
 });
 
