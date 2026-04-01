@@ -5,7 +5,6 @@ const {
   PermissionFlagsBits, REST, Routes,
   SlashCommandBuilder, InteractionType
 } = require('discord.js');
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
 
 const client = new Client({
@@ -17,12 +16,28 @@ const client = new Client({
   ],
 });
 
-
-
 // In-memory store
 const guildConfigs = {};
 const triviaState = {};
 const chatHistories = {};
+
+// ─── OPENROUTER AI HELPER ─────────────────────────────────────────────────────
+async function askAI(messages) {
+  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'meta-llama/llama-3.3-8b-instruct:free',
+      messages,
+    }),
+  });
+  const data = await res.json();
+  if (!data.choices?.[0]?.message?.content) throw new Error(JSON.stringify(data));
+  return data.choices[0].message.content;
+}
 
 // ─── SLASH COMMAND DEFINITIONS ────────────────────────────────────────────────
 const commands = [
@@ -156,7 +171,7 @@ client.on('interactionCreate', async (interaction) => {
       .setTitle('🤖 Bot Commands')
       .addFields(
         { name: '👋 Greetings', value: '`/hello` — Say hello\n`/bye` — Say goodbye', inline: true },
-        { name: '🧠 Trivia', value: '`/trivia` — Start a quiz\n`/trivia [category]` — Themed quiz', inline: true },
+        { name: '🧠 Trivia', value: '`/trivia` — Genshin trivia\n`/trivia [category]` — Themed quiz', inline: true },
         { name: '😂 Memes', value: '`/meme` — Random meme\n`/meme [topic]` — Topic meme', inline: true },
         { name: '💬 AI Chat', value: '`/chat <message>` — Chat with AI\n`/resetchat` — Clear history', inline: true },
         { name: '⚙️ Setup (Admin)', value: '`/setup welcome #channel`\n`/setup message <text>`\n`/setup view`', inline: true },
@@ -181,24 +196,17 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   // ── /trivia ────────────────────────────────────────────────────────────────
-if (commandName === 'trivia') {
+  if (commandName === 'trivia') {
     const requestedCat = interaction.options.getString('category');
     await interaction.deferReply();
 
     if (!requestedCat) {
       try {
-const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENROUTER_API_KEY}` },
-          body: JSON.stringify({ model: 'google/gemma-3-4b-it:free', messages: [{ role: 'user', content: 'Generate a Genshin Impact trivia question. Respond ONLY in this exact JSON format, no extra text: {"question":"...","correct":"...","wrong":["...","...","..."]}' }] })
-        });
-        const aiData = await aiRes.json();
-        if (!aiData.choices || !aiData.choices[0]) throw new Error(JSON.stringify(aiData));         console.log('RAW RESPONSE:', aiData.choices[0].message.content);         let raw = aiData.choices[0].message.content.replace(/```json
-?|```
-?/g, '').trim();
-        const jsonMatch = raw.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) throw new Error('No JSON found in response');
-        const cleaned = jsonMatch[0].replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();         const q = JSON.parse(cleaned);
+        const raw = await askAI([{
+          role: 'user',
+          content: 'Generate a Genshin Impact trivia question. Respond ONLY in this exact JSON format, no extra text: {"question":"...","correct":"...","wrong":["...","...","..."]}'
+        }]);
+        const q = JSON.parse(raw.replace(/```json|```/g, '').trim());
         const allAnswers = shuffle([q.correct, ...q.wrong]);
 
         const embed = new EmbedBuilder()
@@ -226,9 +234,10 @@ const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       return;
     }
 
-const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geography: 22, music: 12 };
+    const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geography: 22, music: 12 };
     const catId = categoryMap[requestedCat] || 9;
     const catName = requestedCat.charAt(0).toUpperCase() + requestedCat.slice(1);
+
     try {
       const res = await fetch(`https://opentdb.com/api.php?amount=1&type=multiple&category=${catId}`);
       const data = await res.json();
@@ -253,7 +262,6 @@ const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geograph
       );
 
       triviaState[msgId] = { correct, allAnswers, userId: interaction.user.id };
-
       const sent = await interaction.editReply({ embeds: [embed], components: [buttons] });
 
       setTimeout(async () => {
@@ -305,21 +313,16 @@ const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geograph
     await interaction.deferReply();
 
     try {
- const messages = [
+      const messages = [
         { role: 'system', content: `You are a friendly and witty Discord bot assistant. Keep responses concise (under 1800 chars), conversational, and engaging. Use occasional emojis but don't overdo it. The user's name is ${interaction.user.username}.` },
-        ...chatHistories[userId].map(m => ({ role: m.role === 'model' ? 'assistant' : 'user', content: m.parts[0].text })),
-        { role: 'user', content: userMsg }
+        ...chatHistories[userId],
+        { role: 'user', content: userMsg },
       ];
-      const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENROUTER_API_KEY}` },
-        body: JSON.stringify({ model: 'google/gemma-3-4b-it:free', messages })
-      });
-      const aiData = await aiRes.json();
-      const reply = aiData.choices[0].message.content;
 
-      chatHistories[userId].push({ role: 'user', parts: [{ text: userMsg }] });
-      chatHistories[userId].push({ role: 'model', parts: [{ text: reply }] });
+      const reply = await askAI(messages);
+
+      chatHistories[userId].push({ role: 'user', content: userMsg });
+      chatHistories[userId].push({ role: 'assistant', content: reply });
 
       if (chatHistories[userId].length > 20) chatHistories[userId] = chatHistories[userId].slice(-20);
 
