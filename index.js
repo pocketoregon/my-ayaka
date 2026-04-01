@@ -190,7 +190,7 @@ if (commandName === 'trivia') {
 const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENROUTER_API_KEY}` },
-          body: JSON.stringify({ model: 'meta-llama/llama-3.2-3b-instruct:free', messages: [{ role: 'user', content: 'Generate a Genshin Impact trivia question. Respond ONLY in this exact JSON format, no extra text: {"question":"...","correct":"...","wrong":["...","...","..."]}' }] })
+          body: JSON.stringify({ model: 'mistralai/mistral-7b-instruct:free', messages: [{ role: 'user', content: 'Generate a Genshin Impact trivia question. Respond ONLY in this exact JSON format, no extra text: {"question":"...","correct":"...","wrong":["...","...","..."]}' }] })
         });
         const aiData = await aiRes.json();
         if (!aiData.choices || !aiData.choices[0]) throw new Error(JSON.stringify(aiData));         const raw = aiData.choices[0].message.content.replace(/```json|```/g, '').trim();
@@ -309,7 +309,7 @@ const categoryMap = { science: 17, history: 23, sports: 21, general: 9, geograph
       const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENROUTER_API_KEY}` },
-        body: JSON.stringify({ model: 'meta-llama/llama-3.2-3b-instruct:free', messages })
+        body: JSON.stringify({ model: 'mistralai/mistral-7b-instruct:free', messages })
       });
       const aiData = await aiRes.json();
       const reply = aiData.choices[0].message.content;
